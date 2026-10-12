@@ -43,6 +43,7 @@ export default function App() {
   const [isPaused, setIsPaused] = useState<boolean>(engine.isPaused);
   const [simulationSpeed, setSimulationSpeed] = useState<number>(engine.simulationSpeed);
   const [isTransmitModalOpen, setIsTransmitModalOpen] = useState(false);
+  const [rebootAnimationTrigger, setRebootAnimationTrigger] = useState<{ timestamp: number; nodeIds?: string[] } | null>(null);
   const [statusNotification, setStatusNotification] = useState<{ message: string; type: 'info' | 'alert' | 'success' } | null>({
     message: 'ARES-MESH Tactical Network initialized. All nodes mutual authenticated via Noise XX.',
     type: 'success',
@@ -237,6 +238,7 @@ export default function App() {
   // Bulk Node Commands
   const handleBulkReboot = (nodeIds: string[]) => {
     const res = engine.bulkRebootNodes(nodeIds);
+    setRebootAnimationTrigger({ timestamp: Date.now(), nodeIds });
     setStatusNotification({
       message: `Bulk Transceivers Rebooted: ${res.recomputedCount} node(s) cleared routing state. Mesh converged in ${res.convergenceMs}ms.`,
       type: 'success',
@@ -272,6 +274,7 @@ export default function App() {
     engine.initDefaultScenario();
     engine.recomputeTopology();
     setSelectedNodeId(null);
+    setRebootAnimationTrigger({ timestamp: Date.now(), nodeIds: engine.nodes.map(n => n.id) });
     setStatusNotification({
       message: 'Tactical mesh topology reset to default expeditionary scenario.',
       type: 'info',
@@ -387,6 +390,7 @@ export default function App() {
                   onBulkSyncSecurity={handleBulkSyncSecurity}
                   onBulkToggleMobility={handleBulkToggleMobility}
                   onBulkFlushDtn={handleBulkFlushDtn}
+                  rebootTrigger={rebootAnimationTrigger}
                   simulationSpeed={simulationSpeed}
                   onChangeSpeed={(s) => {
                     engine.simulationSpeed = s;
@@ -404,6 +408,7 @@ export default function App() {
                   activeProtocol={activeProtocol}
                   onDispatchPacket={(src, dst) => handleDispatchPacket(src, dst)}
                   onToggleMobility={handleToggleMobility}
+                  onRebootNode={(id) => handleBulkReboot([id])}
                   onClose={() => setSelectedNodeId(null)}
                 />
               </div>

@@ -24,6 +24,7 @@ interface NodeDetailsPanelProps {
   activeProtocol: RoutingProtocolType;
   onDispatchPacket: (sourceId: string, targetId: string) => void;
   onToggleMobility: (nodeId: string) => void;
+  onRebootNode?: (nodeId: string) => void;
   onClose: () => void;
 }
 
@@ -34,6 +35,7 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
   activeProtocol,
   onDispatchPacket,
   onToggleMobility,
+  onRebootNode,
   onClose,
 }) => {
   if (!node) {
@@ -228,6 +230,17 @@ export const NodeDetailsPanel: React.FC<NodeDetailsPanelProps> = ({
           <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
           <span>{node.isMoving ? 'Halt Movement' : 'Resume Patrol'}</span>
         </button>
+
+        {onRebootNode && (
+          <button
+            onClick={() => onRebootNode(node.id)}
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-700/80 text-cyan-300 rounded text-xs transition-colors font-medium"
+            title="Reboot node transceiver, flush routes, and smoothly re-animate mesh convergence"
+          >
+            <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Reboot Node</span>
+          </button>
+        )}
       </div>
     </div>
   );

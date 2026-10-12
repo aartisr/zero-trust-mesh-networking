@@ -35,3 +35,77 @@
   transform-origin: center center;
   animation: radar-sweep 8s linear infinite;
 }
+
+/* Tactical Mesh Link & Topology Layout Animations */
+@keyframes link-flow {
+  0% {
+    stroke-dashoffset: 24;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes link-reconverge-stroke {
+  0% {
+    stroke-dashoffset: 600;
+    opacity: 0.15;
+  }
+  40% {
+    stroke-dashoffset: 250;
+    opacity: 0.8;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes shockwave-expand {
+  0% {
+    r: 8px;
+    opacity: 0.95;
+    stroke-width: 3.5px;
+  }
+  70% {
+    opacity: 0.6;
+    stroke-width: 2px;
+  }
+  100% {
+    r: 420px;
+    opacity: 0;
+    stroke-width: 0.5px;
+  }
+}
+
+@keyframes neighbor-ping {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.85;
+  }
+}
+
+.tactical-link-line {
+  transition: stroke 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              stroke-width 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tactical-active-flow {
+  stroke-dasharray: 6 6;
+  animation: link-flow 1.1s linear infinite;
+}
+
+.tactical-reconverge-anim {
+  stroke-dasharray: 600;
+  animation: link-reconverge-stroke 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.tactical-shockwave {
+  animation: shockwave-expand 1.1s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
+}
+

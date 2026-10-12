@@ -47,6 +47,7 @@ interface TacticalCanvasProps {
   onBulkSyncSecurity?: (nodeIds: string[]) => void;
   onBulkToggleMobility?: (nodeIds: string[]) => void;
   onBulkFlushDtn?: (nodeIds: string[]) => void;
+  rebootTrigger?: { timestamp: number; nodeIds?: string[] } | null;
   onUpdateNodePosition: (nodeId: string, x: number, y: number) => void;
   onUpdateJammerPosition: (jammerId: string, x: number, y: number) => void;
   onToggleJammer: (jammerId: string) => void;
@@ -65,6 +66,7 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
   selectedNodeId,
   selectedLinkPair = null,
   selectedNodeIds,
+  rebootTrigger = null,
   onSelectNode,
   onSelectLinkPair,
   onSelectNodeIds,
@@ -93,6 +95,36 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
     setInternalSelectedNodeIds(ids);
     onSelectNodeIds?.(ids);
   };
+
+  // Layout Transition & Topology Re-convergence Animation State
+  const [reconvergeAnimKey, setReconvergeAnimKey] = useState<number>(0);
+  const [reconvergingNodeIds, setReconvergingNodeIds] = useState<string[]>([]);
+  const [reconvergeStatus, setReconvergeStatus] = useState<string | null>(null);
+
+  const triggerReconvergeAnimation = (affectedIds: string[]) => {
+    const ids = affectedIds.length > 0 ? affectedIds : nodes.map(n => n.id);
+    setReconvergeAnimKey(prev => prev + 1);
+    setReconvergingNodeIds(ids);
+    setReconvergeStatus(`MESH RE-CONVERGENCE IN PROGRESS (${ids.length} ASSET${ids.length > 1 ? 'S' : ''})`);
+    setTimeout(() => {
+      setReconvergeStatus(null);
+      setReconvergingNodeIds([]);
+    }, 1200);
+  };
+
+  useEffect(() => {
+    if (rebootTrigger) {
+      triggerReconvergeAnimation(rebootTrigger.nodeIds || []);
+    }
+  }, [rebootTrigger?.timestamp]);
+
+  const prevProtocolRef = useRef(activeProtocol);
+  useEffect(() => {
+    if (prevProtocolRef.current !== activeProtocol) {
+      prevProtocolRef.current = activeProtocol;
+      triggerReconvergeAnimation(nodes.map(n => n.id));
+    }
+  }, [activeProtocol]);
 
   const [selectionBox, setSelectionBox] = useState<{
     startX: number;
@@ -439,6 +471,22 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
             <stop offset="70%" stopColor="#A855F7" stopOpacity="0.04" />
             <stop offset="100%" stopColor="#A855F7" stopOpacity="0" />
           </radialGradient>
+
+          {/* Dynamic Link Transition Glow Filters */}
+          <filter id="link-glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="link-glow-emerald" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
         {/* 1. EW Jamming Zones (Red Contested Spectrum Circles) */}
@@ -651,13 +699,37 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
 
             if (!link.isOperational) return null;
 
-            // Operational Link: Color depends on SNR / TQ
-            const strokeColor = link.tq > 180 ? '#06B6D4' : link.tq > 90 ? '#F59E0B' : '#64748B';
-            const strokeWidth = link.tq > 180 ? 1.5 : 1.0;
+            // Calculate selection and layout transition states
+            const hasSelection = Boolean(selectedNodeId || effectiveSelectedNodeIds.length > 0);
+            const isConnectedToSelected = Boolean(
+              (selectedNodeId && (link.nodeAId === selectedNodeId || link.nodeBId === selectedNodeId)) ||
+              (effectiveSelectedNodeIds.length > 0 &&
+                (effectiveSelectedNodeIds.includes(link.nodeAId) || effectiveSelectedNodeIds.includes(link.nodeBId)))
+            );
+            const isIntraGroupLink = Boolean(
+              effectiveSelectedNodeIds.length > 1 &&
+              effectiveSelectedNodeIds.includes(link.nodeAId) &&
+              effectiveSelectedNodeIds.includes(link.nodeBId)
+            );
+            const isAffectedByReconverge = Boolean(
+              reconvergingNodeIds.length === 0 ||
+              reconvergingNodeIds.includes(link.nodeAId) ||
+              reconvergingNodeIds.includes(link.nodeBId)
+            );
+
+            // Dynamic styling
+            const strokeColor = isIntraGroupLink
+              ? '#10B981'
+              : isConnectedToSelected
+              ? (link.tq > 180 ? '#06B6D4' : '#F59E0B')
+              : (link.tq > 180 ? '#06B6D4' : link.tq > 90 ? '#F59E0B' : '#64748B');
+
+            const strokeWidth = isIntraGroupLink ? 2.4 : isConnectedToSelected ? 2.0 : (link.tq > 180 ? 1.5 : 1.0);
+            const opacity = isConnectedToSelected ? 1.0 : hasSelection ? 0.22 : 0.65;
 
             return (
               <g
-                key={`link-${link.nodeAId}-${link.nodeBId}`}
+                key={`link-${link.nodeAId}-${link.nodeBId}-${reconvergeAnimKey}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   const pair = { nodeAId: link.nodeAId, nodeBId: link.nodeBId };
@@ -668,6 +740,23 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
                 className="cursor-pointer pointer-events-auto group"
               >
                 <title>{`Analyze link in D3 plot: ${nodeA.callsign} <-> ${nodeB.callsign}`}</title>
+                
+                {/* Glowing underlay halo beam when connected to selected node(s) */}
+                {isConnectedToSelected && (
+                  <line
+                    x1={nodeA.x}
+                    y1={nodeA.y}
+                    x2={nodeB.x}
+                    y2={nodeB.y}
+                    stroke={isIntraGroupLink ? '#10B981' : '#06B6D4'}
+                    strokeWidth={isIntraGroupLink ? 6 : 4.5}
+                    opacity="0.35"
+                    filter={isIntraGroupLink ? 'url(#link-glow-emerald)' : 'url(#link-glow-cyan)'}
+                    className="tactical-link-line"
+                  />
+                )}
+
+                {/* Base Link Line with smooth layout transition & reconverge stroke animation */}
                 <line
                   x1={nodeA.x}
                   y1={nodeA.y}
@@ -675,28 +764,104 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
                   y2={nodeB.y}
                   stroke={strokeColor}
                   strokeWidth={strokeWidth}
-                  opacity={selectedNodeId === nodeA.id || selectedNodeId === nodeB.id ? '1' : '0.6'}
+                  opacity={opacity}
+                  className={`tactical-link-line ${
+                    reconvergeStatus && isAffectedByReconverge ? 'tactical-reconverge-anim' : ''
+                  }`}
                 />
+
+                {/* Animated active energy flow dash pulse along selected links */}
+                {isConnectedToSelected && (
+                  <line
+                    x1={nodeA.x}
+                    y1={nodeA.y}
+                    x2={nodeB.x}
+                    y2={nodeB.y}
+                    stroke={isIntraGroupLink ? '#6EE7B7' : '#67E8F9'}
+                    strokeWidth={1.4}
+                    opacity="0.85"
+                    className="tactical-active-flow"
+                  />
+                )}
+
                 {/* Midpoint metric indicator if selected */}
-                {(selectedNodeId === nodeA.id || selectedNodeId === nodeB.id) && (
-                  <text
-                    x={(nodeA.x + nodeB.x) / 2}
-                    y={(nodeA.y + nodeB.y) / 2 - 4}
-                    fill={strokeColor}
-                    fontSize="9"
-                    fontFamily="IBM Plex Mono"
-                    textAnchor="middle"
-                  >
-                    {activeProtocol === 'BATMAN_V'
-                      ? `TQ:${link.tq}`
-                      : activeProtocol === 'OLSR'
-                      ? `ETX:${link.etx}`
-                      : `${link.distanceM}m`}
-                  </text>
+                {isConnectedToSelected && (
+                  <g className="transition-opacity duration-300">
+                    <rect
+                      x={(nodeA.x + nodeB.x) / 2 - 24}
+                      y={(nodeA.y + nodeB.y) / 2 - 14}
+                      width="48"
+                      height="14"
+                      rx="3"
+                      fill="#0B0F19"
+                      fillOpacity="0.85"
+                      stroke={strokeColor}
+                      strokeWidth="0.8"
+                    />
+                    <text
+                      x={(nodeA.x + nodeB.x) / 2}
+                      y={(nodeA.y + nodeB.y) / 2 - 4}
+                      fill={strokeColor}
+                      fontSize="9"
+                      fontFamily="IBM Plex Mono"
+                      fontWeight="600"
+                      textAnchor="middle"
+                    >
+                      {activeProtocol === 'BATMAN_V'
+                        ? `TQ:${link.tq}`
+                        : activeProtocol === 'OLSR'
+                        ? `ETX:${link.etx}`
+                        : `${link.distanceM}m`}
+                    </text>
+                  </g>
                 )}
               </g>
             );
           })}
+
+        {/* 3b. 1-Hop Neighbor Adjacency Rings (Pulsing Orbit Highlight) */}
+        {selectedNodeId &&
+          nodes
+            .filter(n =>
+              n.id !== selectedNodeId &&
+              links.some(l => l.isOperational && ((l.nodeAId === selectedNodeId && l.nodeBId === n.id) || (l.nodeBId === selectedNodeId && l.nodeAId === n.id)))
+            )
+            .map(neighbor => (
+              <g key={`neighbor-ring-${neighbor.id}`} className="pointer-events-none">
+                <circle
+                  cx={neighbor.x}
+                  cy={neighbor.y}
+                  r="24"
+                  fill="none"
+                  stroke="#06B6D4"
+                  strokeWidth="1.2"
+                  strokeDasharray="4 3"
+                  opacity="0.75"
+                  className="animate-spin"
+                  style={{ transformOrigin: `${neighbor.x}px ${neighbor.y}px`, animationDuration: '8s' }}
+                />
+              </g>
+            ))}
+
+        {/* 3c. Topology Re-convergence Expanding Shockwaves */}
+        {reconvergeStatus && (
+          <g key={`reconverge-shockwaves-${reconvergeAnimKey}`} className="pointer-events-none">
+            {(reconvergingNodeIds.length > 0 ? reconvergingNodeIds : nodes.map(n => n.id)).map(nodeId => {
+              const n = nodes.find(item => item.id === nodeId);
+              if (!n) return null;
+              return (
+                <circle
+                  key={`shock-${n.id}-${reconvergeAnimKey}`}
+                  cx={n.x}
+                  cy={n.y}
+                  fill="none"
+                  stroke="#06B6D4"
+                  className="tactical-shockwave"
+                />
+              );
+            })}
+          </g>
+        )}
 
         {/* 4. In-Flight Tactical Packet Particles */}
         {inFlightPackets.map(pkt => {
@@ -782,7 +947,10 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
             </button>
 
             <button
-              onClick={() => onBulkReboot?.(effectiveSelectedNodeIds)}
+              onClick={() => {
+                triggerReconvergeAnimation(effectiveSelectedNodeIds);
+                onBulkReboot?.(effectiveSelectedNodeIds);
+              }}
               className="flex items-center gap-1 px-2.5 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-600/80 text-cyan-300 rounded text-xs transition-colors font-medium"
               title="Bulk reboot transceivers, flush routing tables, and re-converge mesh"
             >
@@ -839,10 +1007,15 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
               }
             }}
             style={{ left: `${node.x}px`, top: `${node.y}px` }}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-30 group transition-transform ${
-              isSelected ? 'scale-110' : 'hover:scale-105'
-            }`}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-30 group ${
+              draggedEntity?.id === node.id ? '' : 'transition-[left,top,transform] duration-500 ease-out'
+            } ${isSelected ? 'scale-110' : 'hover:scale-105'}`}
           >
+            {/* Re-convergence Active Ring Ripple */}
+            {reconvergeStatus && (reconvergingNodeIds.length === 0 || reconvergingNodeIds.includes(node.id)) && (
+              <div className="absolute -inset-2.5 rounded-xl border border-cyan-400 animate-ping pointer-events-none opacity-60" />
+            )}
+
             {/* Group Selected Badge */}
             {isGroupSel && (
               <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-1 py-0.2 bg-cyan-400 text-slate-950 text-[8px] font-bold font-mono rounded-sm leading-none tracking-wider shadow">
@@ -924,6 +1097,17 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
           </div>
         </div>
       ))}
+
+      {/* Re-convergence Topology Layout Transition HUD Banner */}
+      {reconvergeStatus && (
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 bg-[#0B0F19]/95 border border-cyan-400/90 rounded-full shadow-[0_0_24px_rgba(6,182,212,0.5)] flex items-center gap-2 font-mono text-xs text-cyan-300 animate-pulse backdrop-blur-md">
+          <RotateCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+          <span className="font-bold tracking-wider">{reconvergeStatus}</span>
+          <span className="text-[10px] text-cyan-400/80 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800">
+            RE-ANIMATING TOPOLOGY
+          </span>
+        </div>
+      )}
 
       {/* Bottom Floating Legend Bar */}
       <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between text-[11px] font-mono text-slate-400 bg-[#0A0E17]/90 border border-slate-800 px-3 py-1.5 rounded pointer-events-auto">
