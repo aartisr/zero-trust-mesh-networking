@@ -234,6 +234,39 @@ export default function App() {
     }
   };
 
+  // Bulk Node Commands
+  const handleBulkReboot = (nodeIds: string[]) => {
+    const res = engine.bulkRebootNodes(nodeIds);
+    setStatusNotification({
+      message: `Bulk Transceivers Rebooted: ${res.recomputedCount} node(s) cleared routing state. Mesh converged in ${res.convergenceMs}ms.`,
+      type: 'success',
+    });
+  };
+
+  const handleBulkSyncSecurity = (nodeIds: string[]) => {
+    const res = engine.bulkSyncSecurityState(nodeIds);
+    setStatusNotification({
+      message: `Bulk Zero-Trust Sync: ${nodeIds.length} nodes mutually authenticated across ${res.rekeyedPairs} peer links with Noise Protocol XX.`,
+      type: 'success',
+    });
+  };
+
+  const handleBulkToggleMobility = (nodeIds: string[]) => {
+    const res = engine.bulkToggleMobility(nodeIds);
+    setStatusNotification({
+      message: `Mobility toggled for ${res.updatedCount} tactical assets.`,
+      type: 'info',
+    });
+  };
+
+  const handleBulkFlushDtn = (nodeIds: string[]) => {
+    const res = engine.bulkFlushDtn(nodeIds);
+    setStatusNotification({
+      message: `Flushed ${res.flushedCount} CCSDS bundle(s) from custody storage across ${nodeIds.length} node(s).`,
+      type: 'info',
+    });
+  };
+
   // Reset Scenario
   const handleResetScenario = () => {
     engine.initDefaultScenario();
@@ -350,6 +383,10 @@ export default function App() {
                   onToggleJammer={handleToggleJammer}
                   onAddJammer={handleAddJammer}
                   onAddUavNode={handleAddUavNode}
+                  onBulkReboot={handleBulkReboot}
+                  onBulkSyncSecurity={handleBulkSyncSecurity}
+                  onBulkToggleMobility={handleBulkToggleMobility}
+                  onBulkFlushDtn={handleBulkFlushDtn}
                   simulationSpeed={simulationSpeed}
                   onChangeSpeed={(s) => {
                     engine.simulationSpeed = s;

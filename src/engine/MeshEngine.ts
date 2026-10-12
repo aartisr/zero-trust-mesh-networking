@@ -898,4 +898,111 @@ export class MeshSimulationEngine {
 
     this.metrics.jammingLossRatePct = Number(((jammedLinks / Math.max(1, totalPossible)) * 100).toFixed(1));
   }
+
+  /**
+   * Bulk Command: Reboot Transceiver & Re-initialize Routing Tables
+   */
+  bulkRebootNodes(nodeIds: string[]): { recomputedCount: number; convergenceMs: number } {
+    const startMs = performance.now();
+    let count = 0;
+    for (const id of nodeIds) {
+      const node = this.nodes.find(n => n.id === id);
+      if (node) {
+        node.routingTable = [];
+        node.batmanOgmSeq = 1;
+        node.aodvSeq = 1;
+        node.olsrMprSet = [];
+        count++;
+      }
+    }
+
+    this.recomputeTopology();
+    const convergenceMs = Math.round(performance.now() - startMs + Math.random() * 50 + 40);
+    this.metrics.routeConvergenceTimeMs = convergenceMs;
+
+    this.packetHistory.unshift({
+      id: `bulk-reboot-${Date.now().toString(36)}`,
+      timestamp: Date.now(),
+      source: 'TOC-GCS',
+      target: `${count} NODES`,
+      protocol: this.activeProtocol,
+      status: 'DELIVERED',
+      latencyMs: convergenceMs,
+      hops: 1,
+      detail: `Bulk Transceiver Reboot executed across ${count} tactical node(s). Routing tables flushed and re-converged.`,
+    });
+
+    return { recomputedCount: count, convergenceMs };
+  }
+
+  /**
+   * Bulk Command: Sync Zero-Trust Security State (Re-key & Replay Window Alignment)
+   */
+  bulkSyncSecurityState(nodeIds: string[]): { rekeyedPairs: number } {
+    let pairs = 0;
+    const selectedNodes = this.nodes.filter(n => nodeIds.includes(n.id));
+
+    for (let i = 0; i < selectedNodes.length; i++) {
+      const nodeA = selectedNodes[i];
+      nodeA.securityState = 'AUTHENTICATED_MUTUAL';
+      nodeA.replayWindow = initReplayWindow(64);
+
+      for (let j = i + 1; j < selectedNodes.length; j++) {
+        const nodeB = selectedNodes[j];
+        const hs = performNoiseXXHandshake(
+          nodeA.staticPublicKeyHex,
+          nodeB.staticPublicKeyHex
+        );
+        nodeA.activeSessionKeys[nodeB.id] = hs.derivedSharedSecret;
+        nodeB.activeSessionKeys[nodeA.id] = hs.derivedSharedSecret;
+        pairs++;
+      }
+    }
+
+    this.packetHistory.unshift({
+      id: `bulk-sync-${Date.now().toString(36)}`,
+      timestamp: Date.now(),
+      source: 'ZERO-TRUST-AUTH',
+      target: `${selectedNodes.length} NODES`,
+      protocol: this.activeProtocol,
+      status: 'DELIVERED',
+      latencyMs: 18,
+      hops: 1,
+      detail: `Bulk Security Sync: Noise XX ephemeral handshakes completed across ${pairs} peer link(s). Anti-replay bitmasks synchronized.`,
+    });
+
+    return { rekeyedPairs: pairs };
+  }
+
+  /**
+   * Bulk Command: Toggle Mobility (Halt / Resume)
+   */
+  bulkToggleMobility(nodeIds: string[], forceHalt?: boolean): { updatedCount: number } {
+    let count = 0;
+    for (const id of nodeIds) {
+      const node = this.nodes.find(n => n.id === id);
+      if (node) {
+        node.isMoving = forceHalt !== undefined ? !forceHalt : !node.isMoving;
+        count++;
+      }
+    }
+    this.recomputeTopology();
+    return { updatedCount: count };
+  }
+
+  /**
+   * Bulk Command: Flush DTN Custody Buffers
+   */
+  bulkFlushDtn(nodeIds: string[]): { flushedCount: number } {
+    let count = 0;
+    for (const id of nodeIds) {
+      const node = this.nodes.find(n => n.id === id);
+      if (node) {
+        count += node.dtnCustodyQueue.length;
+        node.dtnCustodyQueue = [];
+        node.stats.dtnBundlesHeld = 0;
+      }
+    }
+    return { flushedCount: count };
+  }
 }

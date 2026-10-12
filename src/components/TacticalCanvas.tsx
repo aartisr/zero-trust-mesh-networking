@@ -23,6 +23,11 @@ import {
   Play,
   RotateCcw,
   Activity,
+  Lock,
+  RotateCw,
+  ShieldCheck,
+  HardDrive,
+  MousePointer,
 } from 'lucide-react';
 import { LinkQualityPlot } from './LinkQualityPlot';
 
@@ -34,8 +39,14 @@ interface TacticalCanvasProps {
   activeProtocol: RoutingProtocolType;
   selectedNodeId: string | null;
   selectedLinkPair?: { nodeAId: string; nodeBId: string } | null;
+  selectedNodeIds?: string[];
   onSelectNode: (nodeId: string | null) => void;
   onSelectLinkPair?: (nodeAId: string, nodeBId: string) => void;
+  onSelectNodeIds?: (nodeIds: string[]) => void;
+  onBulkReboot?: (nodeIds: string[]) => void;
+  onBulkSyncSecurity?: (nodeIds: string[]) => void;
+  onBulkToggleMobility?: (nodeIds: string[]) => void;
+  onBulkFlushDtn?: (nodeIds: string[]) => void;
   onUpdateNodePosition: (nodeId: string, x: number, y: number) => void;
   onUpdateJammerPosition: (jammerId: string, x: number, y: number) => void;
   onToggleJammer: (jammerId: string) => void;
@@ -53,8 +64,14 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
   activeProtocol,
   selectedNodeId,
   selectedLinkPair = null,
+  selectedNodeIds,
   onSelectNode,
   onSelectLinkPair,
+  onSelectNodeIds,
+  onBulkReboot,
+  onBulkSyncSecurity,
+  onBulkToggleMobility,
+  onBulkFlushDtn,
   onUpdateNodePosition,
   onUpdateJammerPosition,
   onToggleJammer,
@@ -70,6 +87,20 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [showLinkPlot, setShowLinkPlot] = useState(false);
   const [internalSelectedPair, setInternalSelectedPair] = useState<{ nodeAId: string; nodeBId: string } | null>(null);
+  const [internalSelectedNodeIds, setInternalSelectedNodeIds] = useState<string[]>([]);
+  const effectiveSelectedNodeIds = selectedNodeIds !== undefined ? selectedNodeIds : internalSelectedNodeIds;
+  const setEffectiveSelectedNodeIds = (ids: string[]) => {
+    setInternalSelectedNodeIds(ids);
+    onSelectNodeIds?.(ids);
+  };
+
+  const [selectionBox, setSelectionBox] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+
   const [draggedEntity, setDraggedEntity] = useState<{
     type: 'node' | 'jammer';
     id: string;
@@ -128,28 +159,96 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
     }
   }, [showHeatmap, jammingZones]);
 
-  // Mouse drag handling
-  const handleMouseDown = (e: React.MouseEvent, type: 'node' | 'jammer', id: string, entityX: number, entityY: number) => {
+  // Mouse drag & box select handling
+  const handleContainerMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('select') || target.closest('input')) return;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    setSelectionBox({
+      startX: x,
+      startY: y,
+      currentX: x,
+      currentY: y,
+    });
+  };
+
+  const handleNodeMouseDown = (e: React.MouseEvent, node: TacticalNode) => {
     e.stopPropagation();
-    if (type === 'node') {
-      onSelectNode(id);
+    if (e.shiftKey) {
+      const exists = effectiveSelectedNodeIds.includes(node.id);
+      const next = exists
+        ? effectiveSelectedNodeIds.filter(id => id !== node.id)
+        : [...effectiveSelectedNodeIds, node.id];
+      setEffectiveSelectedNodeIds(next);
+      if (next.length === 1) onSelectNode(next[0]);
+      else onSelectNode(null);
+      return;
     }
+
+    if (!effectiveSelectedNodeIds.includes(node.id)) {
+      setEffectiveSelectedNodeIds([node.id]);
+      onSelectNode(node.id);
+    }
+
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
     setDraggedEntity({
-      type,
-      id,
-      offsetX: mouseX - entityX,
-      offsetY: mouseY - entityY,
+      type: 'node',
+      id: node.id,
+      offsetX: mouseX - node.x,
+      offsetY: mouseY - node.y,
+    });
+  };
+
+  const handleJammerMouseDown = (e: React.MouseEvent, jammer: JammingZone) => {
+    e.stopPropagation();
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    setDraggedEntity({
+      type: 'jammer',
+      id: jammer.id,
+      offsetX: mouseX - jammer.x,
+      offsetY: mouseY - jammer.y,
     });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!draggedEntity) return;
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
+
+    if (selectionBox) {
+      const currentX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+      const currentY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+      setSelectionBox(prev => prev ? { ...prev, currentX, currentY } : null);
+
+      const xMin = Math.min(selectionBox.startX, currentX);
+      const xMax = Math.max(selectionBox.startX, currentX);
+      const yMin = Math.min(selectionBox.startY, currentY);
+      const yMax = Math.max(selectionBox.startY, currentY);
+
+      if (Math.abs(xMax - xMin) > 6 || Math.abs(yMax - yMin) > 6) {
+        const inside = nodes.filter(n => n.x >= xMin && n.x <= xMax && n.y >= yMin && n.y <= yMax).map(n => n.id);
+        setEffectiveSelectedNodeIds(inside);
+        if (inside.length === 1) {
+          onSelectNode(inside[0]);
+        } else if (inside.length > 1) {
+          onSelectNode(null);
+        }
+      }
+      return;
+    }
+
+    if (!draggedEntity) return;
     const newX = Math.max(30, Math.min(rect.width - 30, e.clientX - rect.left - draggedEntity.offsetX));
     const newY = Math.max(30, Math.min(rect.height - 30, e.clientY - rect.top - draggedEntity.offsetY));
 
@@ -161,6 +260,14 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
   };
 
   const handleMouseUp = () => {
+    if (selectionBox) {
+      const dist = Math.hypot(selectionBox.currentX - selectionBox.startX, selectionBox.currentY - selectionBox.startY);
+      if (dist < 6) {
+        setEffectiveSelectedNodeIds([]);
+        onSelectNode(null);
+      }
+      setSelectionBox(null);
+    }
     setDraggedEntity(null);
   };
 
@@ -169,9 +276,9 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
   return (
     <div
       ref={containerRef}
+      onMouseDown={handleContainerMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onClick={() => onSelectNode(null)}
       className="relative w-full h-[620px] bg-[#07090E] border border-[#1E293B] rounded-lg overflow-hidden select-none shadow-2xl cursor-crosshair"
     >
       {/* Background Coordinate Radar Grid */}
@@ -263,6 +370,26 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
         >
           <Activity className="w-3 h-3 text-cyan-400" />
           <span>Link Plot (D3)</span>
+        </button>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (effectiveSelectedNodeIds.length === nodes.length) {
+              setEffectiveSelectedNodeIds([]);
+              onSelectNode(null);
+            } else {
+              setEffectiveSelectedNodeIds(nodes.map(n => n.id));
+              onSelectNode(null);
+            }
+          }}
+          className={`flex items-center gap-1 px-2 py-1 text-xs border rounded transition-colors ${
+            effectiveSelectedNodeIds.length > 1 ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 font-semibold' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+          }`}
+          title="Drag a box on canvas or click to select all nodes"
+        >
+          <MousePointer className="w-3 h-3 text-cyan-400" />
+          <span>{effectiveSelectedNodeIds.length > 1 ? `Group (${effectiveSelectedNodeIds.length})` : 'Box Select'}</span>
         </button>
 
         <button
@@ -612,23 +739,123 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
         })}
       </svg>
 
+      {/* Drag Selection Marquee Box */}
+      {selectionBox && Math.hypot(selectionBox.currentX - selectionBox.startX, selectionBox.currentY - selectionBox.startY) > 5 && (
+        <div
+          style={{
+            left: `${Math.min(selectionBox.startX, selectionBox.currentX)}px`,
+            top: `${Math.min(selectionBox.startY, selectionBox.currentY)}px`,
+            width: `${Math.abs(selectionBox.currentX - selectionBox.startX)}px`,
+            height: `${Math.abs(selectionBox.currentY - selectionBox.startY)}px`,
+          }}
+          className="absolute border border-cyan-400 bg-cyan-500/15 pointer-events-none z-35 rounded-sm shadow-[0_0_12px_rgba(6,182,212,0.35)]"
+        >
+          <div className="absolute -top-5 left-0 px-1.5 py-0.5 bg-[#0B0F19] text-cyan-300 border border-cyan-500/80 rounded text-[9px] font-mono leading-none whitespace-nowrap">
+            GROUP SELECT: {effectiveSelectedNodeIds.length} ASSET{effectiveSelectedNodeIds.length !== 1 ? 'S' : ''}
+          </div>
+        </div>
+      )}
+
+      {/* Floating Group Command Action Bar */}
+      {effectiveSelectedNodeIds.length >= 2 && (
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 bg-[#0B0F19]/95 border border-cyan-500/80 rounded-lg p-2.5 shadow-2xl backdrop-blur-md flex flex-wrap items-center gap-3 font-mono text-xs select-none">
+          <div className="flex items-center gap-2 border-r border-slate-700/80 pr-3">
+            <ShieldCheck className="w-4 h-4 text-cyan-400" />
+            <div>
+              <div className="text-[10px] text-cyan-300 uppercase font-bold tracking-wider">
+                GROUP SELECTED ({effectiveSelectedNodeIds.length} NODES)
+              </div>
+              <div className="text-[9px] text-slate-400 max-w-[200px] truncate">
+                {effectiveSelectedNodeIds.map(id => nodes.find(n => n.id === id)?.callsign).filter(Boolean).join(', ')}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => onBulkSyncSecurity?.(effectiveSelectedNodeIds)}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-600/80 text-emerald-300 rounded text-xs transition-colors font-medium"
+              title="Bulk synchronize Noise Protocol XX mutual authentication and anti-replay windows"
+            >
+              <Lock className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Sync Security State</span>
+            </button>
+
+            <button
+              onClick={() => onBulkReboot?.(effectiveSelectedNodeIds)}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-600/80 text-cyan-300 rounded text-xs transition-colors font-medium"
+              title="Bulk reboot transceivers, flush routing tables, and re-converge mesh"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Reboot Transceivers</span>
+            </button>
+
+            <button
+              onClick={() => onBulkToggleMobility?.(effectiveSelectedNodeIds)}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded text-xs transition-colors"
+              title="Bulk halt or resume patrol/orbit movement"
+            >
+              <Play className="w-3.5 h-3.5 text-amber-400" />
+              <span>Toggle Patrol</span>
+            </button>
+
+            <button
+              onClick={() => onBulkFlushDtn?.(effectiveSelectedNodeIds)}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-950/80 hover:bg-amber-900 border border-amber-600/80 text-amber-300 rounded text-xs transition-colors"
+              title="Flush DTN custody queues across selected nodes"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-amber-400" />
+              <span>Flush DTN</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setEffectiveSelectedNodeIds([]);
+                onSelectNode(null);
+              }}
+              className="px-2 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors text-xs"
+              title="Deselect all nodes"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Interactive Tactical Nodes HTML Overlay (Draggable) */}
       {nodes.map(node => {
-        const isSel = node.id === selectedNodeId;
+        const isSelected = effectiveSelectedNodeIds.includes(node.id) || node.id === selectedNodeId;
+        const isGroupSel = effectiveSelectedNodeIds.includes(node.id) && effectiveSelectedNodeIds.length > 1;
+
         return (
           <div
             key={node.id}
-            onMouseDown={(e) => handleMouseDown(e, 'node', node.id, node.x, node.y)}
-            onClick={(e) => { e.stopPropagation(); onSelectNode(node.id); }}
+            onMouseDown={(e) => handleNodeMouseDown(e, node)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (effectiveSelectedNodeIds.length <= 1) {
+                setEffectiveSelectedNodeIds([node.id]);
+                onSelectNode(node.id);
+              }
+            }}
             style={{ left: `${node.x}px`, top: `${node.y}px` }}
             className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-30 group transition-transform ${
-              isSel ? 'scale-110' : 'hover:scale-105'
+              isSelected ? 'scale-110' : 'hover:scale-105'
             }`}
           >
+            {/* Group Selected Badge */}
+            {isGroupSel && (
+              <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-1 py-0.2 bg-cyan-400 text-slate-950 text-[8px] font-bold font-mono rounded-sm leading-none tracking-wider shadow">
+                GROUP
+              </div>
+            )}
+
             {/* Node Icon Box */}
             <div
               className={`relative flex items-center justify-center w-10 h-10 rounded-lg border transition-all ${
-                isSel
+                isGroupSel
+                  ? 'bg-cyan-950 border-cyan-400 text-cyan-200 ring-2 ring-cyan-400 ring-offset-2 ring-offset-[#07090E] shadow-[0_0_20px_rgba(6,182,212,0.6)]'
+                  : isSelected
                   ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.4)]'
                   : node.role === 'uav'
                   ? 'bg-slate-900/90 border-slate-700 text-cyan-400 hover:border-cyan-500'
@@ -669,7 +896,7 @@ export const TacticalCanvas: React.FC<TacticalCanvasProps> = ({
       {jammingZones.map(jammer => (
         <div
           key={jammer.id}
-          onMouseDown={(e) => handleMouseDown(e, 'jammer', jammer.id, jammer.x, jammer.y)}
+          onMouseDown={(e) => handleJammerMouseDown(e, jammer)}
           onClick={(e) => { e.stopPropagation(); onToggleJammer(jammer.id); }}
           style={{ left: `${jammer.x}px`, top: `${jammer.y}px` }}
           className="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-25 group"
