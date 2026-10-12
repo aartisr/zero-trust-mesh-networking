@@ -1,0 +1,6 @@
+{
+  "name": "ARES-MESH Tactical Protocol",
+  "description": "Zero-trust peer-to-peer tactical mesh networking simulator featuring BATMAN, OLSR, AODV routing, Noise Protocol XX encryption, DTN custody transfer, and STANAG 4586 telemetry.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
